@@ -109,6 +109,7 @@ for event_url, schedule_url in zip(event_urls, schedule_urls):
             'loser': loser_team,
             'final_score': final_score
         }
+        
         all_games_data.append(game_data)
 
 conn.commit()
