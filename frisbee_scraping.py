@@ -3,7 +3,7 @@ from bs4 import BeautifulSoup
 import re
 import sqlite3
 
-# ----------- Read URLs from Files -----------
+# ----------- Read URLs from Files-----------
 event_urls = []
 with open('event_pages.txt') as f:
     for line in f:
@@ -18,8 +18,8 @@ with open('schedule_pages.txt') as f:
         if stripped:
             schedule_urls.append(stripped)
 
-# ----------- Set Up Database -----------
-conn = sqlite3.connect('games.db')
+# ----------- Create and Set Up Frisbee Database -----------
+conn = sqlite3.connect('games.db')  
 cur = conn.cursor()
 
 # Create table if it doesn't exist
@@ -39,17 +39,21 @@ conn.commit()
 cur.execute('DELETE FROM games')
 conn.commit()
 
-# ----------- Scrape Data and Insert into Database -----------
+# ----------- Scrape and Insert Data into Database -----------
 all_games_data = []
 
-session = requests.Session()  # Reuse session for faster requests
+session = requests.Session() 
 
 def clean_team_name(name):
     return re.sub(r'\s*\(\d+\)', '', name).strip()
 
+def is_valid_score(score):
+    # Check if score is valid (not a forfiet or 0-0)
+    return score != "0-0" and "F-" not in score and "-F" not in score
+
 for event_url, schedule_url in zip(event_urls, schedule_urls):
     
-    # --- Extract city and state from event page ---
+    # Get city and state from event page
     event_response = session.get(event_url)
     event_soup = BeautifulSoup(event_response.content, 'html.parser')
 
@@ -63,7 +67,7 @@ for event_url, schedule_url in zip(event_urls, schedule_urls):
     state = match.group(2) if match else None
     location = f"{city}, {state}" if city and state else None
 
-    # --- Extract game results from schedule page ---
+    # Get game results from schedule page
     schedule_response = session.get(schedule_url)
     schedule_soup = BeautifulSoup(schedule_response.content, 'html.parser')
     bracket_games = schedule_soup.find_all('div', class_='bracket_game')
@@ -82,12 +86,15 @@ for event_url, schedule_url in zip(event_urls, schedule_urls):
         winner_team = clean_team_name(winner_team_raw)
         loser_team = clean_team_name(loser_team_raw)
 
-        # Extract date 
-        full_date = game.find('span', class_='date').text.strip()
-        date_match = re.match(r'^[A-Za-z]+\s+\d{1,2},\s+\d{4}', full_date)
-        game_date = date_match.group(0) if date_match else full_date
+        # Get the date
+        game_date = game.find('span', class_='date').text.strip()
 
+        # Get the final score 
         final_score = f"{winner_score}-{loser_score}"
+
+        # Skip games with forfeits or 0-0 score
+        if not is_valid_score(final_score):
+            continue
 
         # Save to database
         cur.execute('''
