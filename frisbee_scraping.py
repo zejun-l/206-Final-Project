@@ -1,158 +1,117 @@
-import sqlite3
 import requests
 from bs4 import BeautifulSoup
 import re
+import sqlite3
 
-# Create table to store championship data
-def create_frisbee_database():
-    conn = sqlite3.connect('frisbee_database.db')
-    cursor = conn.cursor()
+# ----------- Read URLs from Files -----------
+event_urls = []
+with open('event_pages.txt') as f:
+    for line in f:
+        stripped = line.strip()
+        if stripped:
+            event_urls.append(stripped)
 
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS championships (
-            year TEXT,
-            date TEXT,
-            winner TEXT,
-            runner_up TEXT,
-            score TEXT,
-            venue TEXT,
-            location TEXT,
-            league TEXT
-        )
-    ''')
+schedule_urls = []
+with open('schedule_pages.txt') as f:
+    for line in f:
+        stripped = line.strip()
+        if stripped:
+            schedule_urls.append(stripped)
 
-    conn.commit()
-    conn.close()
+# ----------- Set Up Database -----------
+conn = sqlite3.connect('games.db')
+cur = conn.cursor()
 
+# Create table if it doesn't exist
+cur.execute('''
+    CREATE TABLE IF NOT EXISTS games (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        location TEXT,
+        game_date TEXT,
+        winner TEXT,
+        loser TEXT,
+        final_score TEXT
+    )
+''')
+conn.commit()
 
-# Insert data into database 
-def insert_data(league, year, date, winner, runner_up, score, venue, location):
-    conn = sqlite3.connect('frisbee_database.db')
-    cursor = conn.cursor()
+# Clear existing data to avoid duplicates
+cur.execute('DELETE FROM games')
+conn.commit()
 
-    cursor.execute('''
-        INSERT INTO championships (year, date, winner, runner_up, score, venue, location, league)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (year, date, winner, runner_up, score, venue, location, league))
+# ----------- Scrape Data and Insert into Database -----------
+all_games_data = []
 
-    conn.commit()
-    conn.close()
+session = requests.Session()  # Reuse session for faster requests
 
+def clean_team_name(name):
+    return re.sub(r'\s*\(\d+\)', '', name).strip()
 
-# Scrape data from UFA Wikipedia page
-def scrape_ufa_championships():
-    url = "https://en.wikipedia.org/wiki/Ultimate_Frisbee_Association"
-    response = requests.get(url)
-    soup = BeautifulSoup(response.text, "html.parser")
-
-    # Find the championship table
-    table = soup.find("caption", string=lambda t: "Ultimate Frisbee Association championships" in t).find_parent("table")
+for event_url, schedule_url in zip(event_urls, schedule_urls):
     
-    # Loop through table rows and store data
-    for row in table.find_all("tr")[1:]:
-        cells = row.find_all(["th", "td"])
-        if len(cells) < 7:
+    # --- Extract city and state from event page ---
+    event_response = session.get(event_url)
+    event_soup = BeautifulSoup(event_response.content, 'html.parser')
+
+    info_div = event_soup.find('div', class_='eventInfo2')
+    info_text = info_div.get_text(separator=' ', strip=True) if info_div else ''
+
+    pattern = r'City:\s*(.*?)\s+Date:\s*.*?\s+State:\s*([A-Z]{2})'
+    match = re.search(pattern, info_text)
+
+    city = match.group(1) if match else None
+    state = match.group(2) if match else None
+    location = f"{city}, {state}" if city and state else None
+
+    # --- Extract game results from schedule page ---
+    schedule_response = session.get(schedule_url)
+    schedule_soup = BeautifulSoup(schedule_response.content, 'html.parser')
+    bracket_games = schedule_soup.find_all('div', class_='bracket_game')
+
+    for game in bracket_games:
+        winner_area = game.find('div', class_='top_area')
+        loser_area = game.find('div', class_='btm_area')
+        if not (winner_area and loser_area):
             continue
 
-        # Get the year 
-        year_cell = cells[0]
-        year = year_cell.get_text(strip=True)
-        year = re.sub(r'\[.*?\]', '', year).strip() 
+        winner_score = winner_area.find('span', class_='score').text.strip()
+        winner_team_raw = winner_area.find('span', class_='team').text.strip()
+        loser_score = loser_area.find('span', class_='score').text.strip()
+        loser_team_raw = loser_area.find('span', class_='team').text.strip()
 
-        # Get other data
-        date = cells[1].get_text(strip=True)
-        winner = cells[2].get_text(strip=True)
-        score = cells[3].get_text(strip=True)
-        runner_up = cells[4].get_text(strip=True)
-        venue = cells[5].get_text(strip=True)
-        location = cells[6].get_text(strip=True)
+        winner_team = clean_team_name(winner_team_raw)
+        loser_team = clean_team_name(loser_team_raw)
 
-        # Skip invalid rows
-        if "No champion" in winner or winner == "NA":
-            continue
-        
-        # Insert data into the database
-        insert_data("UFA", year, date, winner, runner_up, score, venue, location)
+        # Extract date 
+        full_date = game.find('span', class_='date').text.strip()
+        date_match = re.match(r'^[A-Za-z]+\s+\d{1,2},\s+\d{4}', full_date)
+        game_date = date_match.group(0) if date_match else full_date
 
+        final_score = f"{winner_score}-{loser_score}"
 
-# Scrape data from PUL Wikipedia page
-def scrape_pul_championships():
-    url = "https://en.wikipedia.org/wiki/Premier_Ultimate_League"
-    response = requests.get(url)
-    soup = BeautifulSoup(response.text, "html.parser")
+        # Save to database
+        cur.execute('''
+            INSERT INTO games (location, game_date, winner, loser, final_score)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (location, game_date, winner_team, loser_team, final_score))
 
-    # Find the table that contains the championship data 
-    table_caption = soup.find("caption", string=lambda text: text and "PUL champions" in text)
-    table = table_caption.find_parent("table")
-    
-    # Loop through each row in the table 
-    for row in table.find_all("tr")[1:]:
-        cells = row.find_all(["th", "td"])
-        if len(cells) < 7:
-            continue
+        game_data = {
+            'location': location,
+            'game_date': game_date,
+            'winner': winner_team,
+            'loser': loser_team,
+            'final_score': final_score
+        }
+        all_games_data.append(game_data)
 
-        # Get the year
-        year = cells[0].get_text(strip=True).split("[")[0]
-        
-        # Get other data 
-        date = cells[1].get_text(strip=True)
-        winner = cells[2].get_text(strip=True)
-        score = cells[3].get_text(strip=True)
-        runner_up = cells[4].get_text(strip=True)
-        venue = cells[5].get_text(strip=True)
-        location = cells[6].get_text(strip=True)
-
-        # Skip invalid rows 
-        if "Canceled" in winner:
-            continue
-
-        # Insert data into the database
-        insert_data("PUL", year, date, winner, runner_up, score, venue, location)
+conn.commit()
+conn.close()
 
 
-# Scrape data from WUL Wikipedia page
-def scrape_wul_championships():
-    url = "https://en.wikipedia.org/wiki/Western_Ultimate_League"
-    response = requests.get(url)
-    soup = BeautifulSoup(response.text, "html.parser")
-
-    # Find the table that contains the championship data 
-    table_caption = soup.find("caption", string=lambda text: text and "WUL champions" in text)
-    table = table_caption.find_parent("table")
-    
-    # Loop through each row in the table (skip header row)
-    for row in table.find_all("tr")[1:]:
-        cells = row.find_all(["th", "td"])
-
-        # Skip rows with missing or incomplete data
-        if len(cells) < 7:
-            continue
-        
-        # Extract the year (clean citation references if present)
-        year = cells[0].get_text(strip=True).split("[")[0]
-        
-        # Extract the date, winner, score, runner-up, venue, and location
-        date = cells[1].get_text(strip=True)
-        winner = cells[2].get_text(strip=True)
-        score = cells[3].get_text(strip=True)
-        runner_up = cells[4].get_text(strip=True)
-        venue = cells[5].get_text(strip=True)
-        location = cells[6].get_text(strip=True)
-
-        # Skip invalid rows (e.g., canceled events)
-        if "Canceled" in winner:
-            continue
-
-        # Insert data into the database
-        insert_data("WUL", year, date, winner, runner_up, score, venue, location)
-
-# Create the database and table
-create_frisbee_database()
-
-# Scrape and store data in database
-scrape_ufa_championships()
-scrape_pul_championships()
-scrape_wul_championships()
-
-# Confirm data has been stored in database
-print("Data has been stored in the database.")
+for game in all_games_data:
+    print(f"Game Date: {game['game_date']}")
+    print(f"Location: {game['location']}")
+    print(f"Winner: {game['winner']}")
+    print(f"Loser: {game['loser']}")
+    print(f"Final Score: {game['final_score']}")
+    print('-' * 40)
