@@ -7,12 +7,16 @@ import sqlite3
 event_urls = []
 with open('event_pages.txt') as f:
     for line in f:
-        event_urls.append(line.strip())
+        stripped = line.strip()
+        if stripped:
+            event_urls.append(stripped)
 
 schedule_urls = []
 with open('schedule_pages.txt') as f:
     for line in f:
-        schedule_urls.append(line.strip())
+        stripped = line.strip()
+        if stripped:
+            schedule_urls.append(stripped)
 
 # ----------- Create and Set Up Frisbee Database ----------- 
 conn = sqlite3.connect('games.db')  
@@ -60,18 +64,18 @@ cur.execute('''
 conn.commit()
 
 # ----------- Clear all tables once (comment out code after first run) ----------- 
-cur.execute('DELETE FROM games')
-cur.execute('DELETE FROM locations')
-cur.execute('DELETE FROM teams')
-cur.execute('DELETE FROM dates')
-conn.commit()
+# cur.execute('DELETE FROM games')
+# cur.execute('DELETE FROM locations')
+# cur.execute('DELETE FROM teams')
+# cur.execute('DELETE FROM dates')
+# conn.commit()
 
 # ----------- Reset autoincrement (comment out code after first run) ----------- 
-cur.execute('''DELETE FROM sqlite_sequence WHERE name='locations' ''')
-cur.execute('''DELETE FROM sqlite_sequence WHERE name='teams' ''')
-cur.execute('''DELETE FROM sqlite_sequence WHERE name='dates' ''')
-cur.execute('''DELETE FROM sqlite_sequence WHERE name='games' ''')
-conn.commit()
+# cur.execute('''DELETE FROM sqlite_sequence WHERE name='locations' ''')
+# cur.execute('''DELETE FROM sqlite_sequence WHERE name='teams' ''')
+# cur.execute('''DELETE FROM sqlite_sequence WHERE name='dates' ''')
+# cur.execute('''DELETE FROM sqlite_sequence WHERE name='games' ''')
+# conn.commit()
 
 # ----------- Scrape and Insert Data into Database ----------- 
 all_games_data = []
