@@ -70,6 +70,13 @@ conn.commit()
 # cur.execute('DELETE FROM dates')
 # conn.commit()
 
+# ----------- Reset autoincrement (comment out code after first run) ----------- 
+# cur.execute('''DELETE FROM sqlite_sequence WHERE name='locations' ''')
+# cur.execute('''DELETE FROM sqlite_sequence WHERE name='teams' ''')
+# cur.execute('''DELETE FROM sqlite_sequence WHERE name='dates' ''')
+# cur.execute('''DELETE FROM sqlite_sequence WHERE name='games' ''')
+# conn.commit()
+
 # ----------- Scrape and Insert Data into Database ----------- 
 all_games_data = []
 
@@ -190,9 +197,10 @@ for event_url, schedule_url in zip(event_urls, schedule_urls):
         # Clean and convert final score to integers
         winner_score_int, loser_score_int = clean_score(f"{winner_score}-{loser_score}")
 
-        # Skip games with invalid scores (e.g., forfeits or 0-0 score)
-        if winner_score_int is None or loser_score_int is None:
-            continue
+        # Use is_valid_score to check if the score is valid
+        if not is_valid_score(f"{winner_score}-{loser_score}"):
+            print(f"Skipping invalid game: {winner_team} vs {loser_team} ({game_date}) with score {winner_score}-{loser_score}")
+            continue  # Skip this game if the score is invalid
 
         # Ensure correct score order
         if winner_score_int < loser_score_int: 
@@ -200,8 +208,8 @@ for event_url, schedule_url in zip(event_urls, schedule_urls):
             winner_id, loser_id = loser_id, winner_id
 
         # Check if this game is already in the database
-        cur.execute('''
-            SELECT 1 FROM games
+        cur.execute(''' 
+            SELECT 1 FROM games 
             WHERE location_id=? AND date_id=? AND winner_id=? AND loser_id=? AND winner_score=? AND loser_score=? 
         ''', (location_id, date_id, winner_id, loser_id, winner_score_int, loser_score_int))
 
@@ -212,19 +220,19 @@ for event_url, schedule_url in zip(event_urls, schedule_urls):
             continue  
 
         # Save to database
-        cur.execute('''
-            INSERT INTO games (location_id, date_id, winner_id, loser_id, winner_score, loser_score)
-            VALUES (?, ?, ?, ?, ?, ?)
+        cur.execute(''' 
+            INSERT INTO games (location_id, date_id, winner_id, loser_id, winner_score, loser_score) 
+            VALUES (?, ?, ?, ?, ?, ?) 
         ''', (location_id, date_id, winner_id, loser_id, winner_score_int, loser_score_int))
 
-        game_data = {
-            'location': f"{city}, {state}",
-            'game_date': game_date,
-            'winner': winner_team,
-            'loser': loser_team,
-            'final_score': f"{winner_score_int}-{loser_score_int}"
+        game_data = { 
+            'location': f"{city}, {state}", 
+            'game_date': game_date, 
+            'winner': winner_team, 
+            'loser': loser_team, 
+            'final_score': f"{winner_score_int}-{loser_score_int}" 
         }
-        
+
         all_games_data.append(game_data)
         new_games_count += 1
 
