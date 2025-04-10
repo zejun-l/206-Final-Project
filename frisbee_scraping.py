@@ -35,9 +35,9 @@ cur.execute('''
 ''')
 conn.commit()
 
-# Clear existing data to avoid duplicates
-cur.execute('DELETE FROM games')
-conn.commit()
+# Clear existing data (comment out after first run to clear)
+# cur.execute('DELETE FROM games')
+# conn.commit()
 
 # ----------- Scrape and Insert Data into Database -----------
 all_games_data = []
@@ -51,7 +51,12 @@ def is_valid_score(score):
     # Check if score is valid (not a forfiet or 0-0)
     return score != "0-0" and "F-" not in score and "-F" not in score
 
+new_games_count = 0
+max_new_games = 25
+
 for event_url, schedule_url in zip(event_urls, schedule_urls):
+    if new_games_count >= max_new_games:
+        break
     
     # Get city and state from event page
     event_response = session.get(event_url)
@@ -73,6 +78,9 @@ for event_url, schedule_url in zip(event_urls, schedule_urls):
     bracket_games = schedule_soup.find_all('div', class_='bracket_game')
 
     for game in bracket_games:
+        if new_games_count >= max_new_games:
+            break
+
         winner_area = game.find('div', class_='top_area')
         loser_area = game.find('div', class_='btm_area')
         if not (winner_area and loser_area):
@@ -96,6 +104,16 @@ for event_url, schedule_url in zip(event_urls, schedule_urls):
         if not is_valid_score(final_score):
             continue
 
+        # Check if this game is already in the database
+        cur.execute('''
+            SELECT 1 FROM games
+            WHERE location=? AND game_date=? AND winner=? AND loser=? AND final_score=?
+        ''', (location, game_date, winner_team, loser_team, final_score))
+
+        # If game already in database, skip
+        if cur.fetchone():
+            continue  
+
         # Save to database
         cur.execute('''
             INSERT INTO games (location, game_date, winner, loser, final_score)
@@ -111,11 +129,22 @@ for event_url, schedule_url in zip(event_urls, schedule_urls):
         }
         
         all_games_data.append(game_data)
+        new_games_count += 1
 
 conn.commit()
+
+# Show how many total entries are in the database
+cur.execute('SELECT COUNT(*) FROM games')
+total_games = cur.fetchone()[0]
+print(f"\nTotal games in database: {total_games}")
+
+# Show how many new entries were added this run
+print(f"New games added this run: {new_games_count}")
+print('-' * 40)
+
 conn.close()
 
-
+# Show list of games 
 for game in all_games_data:
     print(f"Game Date: {game['game_date']}")
     print(f"Location: {game['location']}")
