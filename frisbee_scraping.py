@@ -18,46 +18,124 @@ with open('schedule_pages.txt') as f:
         if stripped:
             schedule_urls.append(stripped)
 
-# ----------- Create and Set Up Frisbee Database -----------
+# ----------- Create and Set Up Frisbee Database ----------- 
 conn = sqlite3.connect('games.db')  
 cur = conn.cursor()
 
-# Create table if it doesn't exist
+# Create tables for locations, teams, dates, and games
+cur.execute('''
+    CREATE TABLE IF NOT EXISTS locations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        city TEXT,
+        state TEXT,
+        UNIQUE(city, state)  -- Ensure unique locations
+    )
+''')
+
+cur.execute('''
+    CREATE TABLE IF NOT EXISTS teams (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        team_name TEXT UNIQUE  -- Ensure unique teams
+    )
+''')
+
+cur.execute('''
+    CREATE TABLE IF NOT EXISTS dates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        game_date TEXT UNIQUE  -- Ensure unique dates
+    )
+''')
+
 cur.execute('''
     CREATE TABLE IF NOT EXISTS games (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        location TEXT,
-        game_date TEXT,
-        winner TEXT,
-        loser TEXT,
-        final_score TEXT
+        location_id INTEGER,
+        date_id INTEGER,
+        winner_id INTEGER,
+        loser_id INTEGER,
+        winner_score INTEGER,  -- Store winner score as an integer
+        loser_score INTEGER,   -- Store loser score as an integer
+        FOREIGN KEY (location_id) REFERENCES locations(id),
+        FOREIGN KEY (date_id) REFERENCES dates(id),
+        FOREIGN KEY (winner_id) REFERENCES teams(id),
+        FOREIGN KEY (loser_id) REFERENCES teams(id)
     )
 ''')
 conn.commit()
 
-# Clear existing data (comment out after first run to clear)
+# ----------- Clear all tables once (comment out code after first run) ----------- 
 # cur.execute('DELETE FROM games')
+# cur.execute('DELETE FROM locations')
+# cur.execute('DELETE FROM teams')
+# cur.execute('DELETE FROM dates')
 # conn.commit()
 
-# ----------- Scrape and Insert Data into Database -----------
+# ----------- Scrape and Insert Data into Database ----------- 
 all_games_data = []
 
-session = requests.Session() 
+# Insert location into database
+def insert_location(city, state):
+    cur.execute('''
+        INSERT OR IGNORE INTO locations (city, state) VALUES (?, ?)
+    ''', (city, state))
+    conn.commit()
+    
+    # Get location ID
+    cur.execute('''
+        SELECT id FROM locations WHERE city=? AND state=? 
+    ''', (city, state))
+    return cur.fetchone()[0]
+
+# Insert team name into database
+def insert_team(team_name):
+    cur.execute('''
+        INSERT OR IGNORE INTO teams (team_name) VALUES (?)
+    ''', (team_name,))
+    conn.commit()
+
+    # Get team ID
+    cur.execute('''
+        SELECT id FROM teams WHERE team_name=? 
+    ''', (team_name,))
+    return cur.fetchone()[0]
+
+# Insert game date into database
+def insert_game_date(game_date):
+    cur.execute('''
+        INSERT OR IGNORE INTO dates (game_date) VALUES (?)
+    ''', (game_date,))
+    conn.commit()
+    
+    # Get date ID
+    cur.execute('''
+        SELECT id FROM dates WHERE game_date=? 
+    ''', (game_date,))
+    return cur.fetchone()[0]
+
+session = requests.Session()
 
 def clean_team_name(name):
     return re.sub(r'\s*\(\d+\)', '', name).strip()
 
 def is_valid_score(score):
-    # Check if score is valid (not a forfiet or 0-0)
+    # Check if score is valid (not a forfeit or 0-0)
     return score != "0-0" and "F-" not in score and "-F" not in score
 
-new_games_count = 0
-max_new_games = 25
+def clean_score(score):
+    # Check if the score is a valid number
+    try:
+        scores = score.split('-')
+        winner_score = int(scores[0])
+        loser_score = int(scores[1])
+        return winner_score, loser_score
+    except ValueError:
+        return None, None 
 
+max_new_games = 25
+new_games_count = 0
+
+# Loop through event and schedule URLs
 for event_url, schedule_url in zip(event_urls, schedule_urls):
-    if new_games_count >= max_new_games:
-        break
-    
     # Get city and state from event page
     event_response = session.get(event_url)
     event_soup = BeautifulSoup(event_response.content, 'html.parser')
@@ -70,7 +148,7 @@ for event_url, schedule_url in zip(event_urls, schedule_urls):
 
     city = match.group(1) if match else None
     state = match.group(2) if match else None
-    location = f"{city}, {state}" if city and state else None
+    location_id = insert_location(city, state)
 
     # Get game results from schedule page
     schedule_response = session.get(schedule_url)
@@ -79,7 +157,7 @@ for event_url, schedule_url in zip(event_urls, schedule_urls):
 
     for game in bracket_games:
         if new_games_count >= max_new_games:
-            break
+            break 
 
         winner_area = game.find('div', class_='top_area')
         loser_area = game.find('div', class_='btm_area')
@@ -94,42 +172,63 @@ for event_url, schedule_url in zip(event_urls, schedule_urls):
         winner_team = clean_team_name(winner_team_raw)
         loser_team = clean_team_name(loser_team_raw)
 
+        # Insert teams into the teams table
+        winner_id = insert_team(winner_team)
+        loser_id = insert_team(loser_team)
+
         # Get the date
         game_date = game.find('span', class_='date').text.strip()
 
-        # Get the final score 
-        final_score = f"{winner_score}-{loser_score}"
+        # Use regex to match the date (MM/DD/YYYY)
+        match = re.match(r'(\d{1,2}/\d{1,2}/\d{4})', game_date)
+        if match:
+            game_date = match.group(1)  
+    
+        # Insert date into the dates table
+        date_id = insert_game_date(game_date)
 
-        # Skip games with forfeits or 0-0 score
-        if not is_valid_score(final_score):
+        # Clean and convert final score to integers
+        winner_score_int, loser_score_int = clean_score(f"{winner_score}-{loser_score}")
+
+        # Skip games with invalid scores (e.g., forfeits or 0-0 score)
+        if winner_score_int is None or loser_score_int is None:
             continue
+
+        # Ensure correct score order
+        if winner_score_int < loser_score_int: 
+            winner_score_int, loser_score_int = loser_score_int, winner_score_int
+            winner_id, loser_id = loser_id, winner_id
 
         # Check if this game is already in the database
         cur.execute('''
             SELECT 1 FROM games
-            WHERE location=? AND game_date=? AND winner=? AND loser=? AND final_score=?
-        ''', (location, game_date, winner_team, loser_team, final_score))
+            WHERE location_id=? AND date_id=? AND winner_id=? AND loser_id=? AND winner_score=? AND loser_score=? 
+        ''', (location_id, date_id, winner_id, loser_id, winner_score_int, loser_score_int))
 
         # If game already in database, skip
-        if cur.fetchone():
+        existing_game = cur.fetchone()
+        if existing_game:
+            print(f"Skipping duplicate game: {winner_team} vs {loser_team} ({game_date})")
             continue  
 
         # Save to database
         cur.execute('''
-            INSERT INTO games (location, game_date, winner, loser, final_score)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (location, game_date, winner_team, loser_team, final_score))
+            INSERT INTO games (location_id, date_id, winner_id, loser_id, winner_score, loser_score)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (location_id, date_id, winner_id, loser_id, winner_score_int, loser_score_int))
 
         game_data = {
-            'location': location,
+            'location': f"{city}, {state}",
             'game_date': game_date,
             'winner': winner_team,
             'loser': loser_team,
-            'final_score': final_score
+            'final_score': f"{winner_score_int}-{loser_score_int}"
         }
         
         all_games_data.append(game_data)
         new_games_count += 1
+
+        conn.commit()
 
 conn.commit()
 
@@ -144,7 +243,7 @@ print('-' * 40)
 
 conn.close()
 
-# Show list of games 
+# Show list of games
 for game in all_games_data:
     print(f"Game Date: {game['game_date']}")
     print(f"Location: {game['location']}")
