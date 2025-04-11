@@ -3,7 +3,7 @@ from bs4 import BeautifulSoup
 import re
 import sqlite3
 
-# ----------- Read URLs from Files-----------
+# ----------- Read URLs from files-----------
 event_urls = []
 with open('event_pages.txt') as f:
     for line in f:
@@ -18,7 +18,7 @@ with open('schedule_pages.txt') as f:
         if stripped:
             schedule_urls.append(stripped)
 
-# ----------- Create and Set Up Frisbee Database ----------- 
+# ----------- Create and set up database ----------- 
 conn = sqlite3.connect('games.db')  
 cur = conn.cursor()
 
@@ -28,21 +28,21 @@ cur.execute('''
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         city TEXT,
         state TEXT,
-        UNIQUE(city, state)  -- Ensure unique locations
+        UNIQUE(city, state)  
     )
 ''')
 
 cur.execute('''
     CREATE TABLE IF NOT EXISTS teams (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        team_name TEXT UNIQUE  -- Ensure unique teams
+        team_name TEXT UNIQUE  
     )
 ''')
 
 cur.execute('''
     CREATE TABLE IF NOT EXISTS dates (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        game_date TEXT UNIQUE  -- Ensure unique dates
+        game_date TEXT UNIQUE  
     )
 ''')
 
@@ -53,8 +53,8 @@ cur.execute('''
         date_id INTEGER,
         winner_id INTEGER,
         loser_id INTEGER,
-        winner_score INTEGER,  -- Store winner score as an integer
-        loser_score INTEGER,   -- Store loser score as an integer
+        winner_score INTEGER,  
+        loser_score INTEGER,   
         FOREIGN KEY (location_id) REFERENCES locations(id),
         FOREIGN KEY (date_id) REFERENCES dates(id),
         FOREIGN KEY (winner_id) REFERENCES teams(id),
@@ -77,7 +77,7 @@ conn.commit()
 # cur.execute('''DELETE FROM sqlite_sequence WHERE name='games' ''')
 # conn.commit()
 
-# ----------- Scrape and Insert Data into Database ----------- 
+# ----------- Scrape and insert data into database----------- 
 all_games_data = []
 
 # Insert location into database
@@ -179,7 +179,7 @@ for event_url, schedule_url in zip(event_urls, schedule_urls):
         winner_team = clean_team_name(winner_team_raw)
         loser_team = clean_team_name(loser_team_raw)
 
-        # Insert teams into the teams table
+        # Insert teams into teams table
         winner_id = insert_team(winner_team)
         loser_id = insert_team(loser_team)
 
@@ -191,23 +191,23 @@ for event_url, schedule_url in zip(event_urls, schedule_urls):
         if match:
             game_date = match.group(1)  
     
-        # Insert date into the dates table
+        # Insert date into dates table
         date_id = insert_game_date(game_date)
 
         # Clean and convert final score to integers
         winner_score_int, loser_score_int = clean_score(f"{winner_score}-{loser_score}")
 
-        # Use is_valid_score to check if the score is valid
+        # Checks if score is valid (not 0-0, F-W)
         if not is_valid_score(f"{winner_score}-{loser_score}"):
             print(f"Skipping invalid game: {winner_team} vs {loser_team} ({game_date}) with score {winner_score}-{loser_score}")
             continue  # Skip this game if the score is invalid
 
-        # Ensure correct score order
+        # Make sure score is in correct order
         if winner_score_int < loser_score_int: 
             winner_score_int, loser_score_int = loser_score_int, winner_score_int
             winner_id, loser_id = loser_id, winner_id
 
-        # Check if this game is already in the database
+        # Check if game is already in the database
         cur.execute(''' 
             SELECT 1 FROM games 
             WHERE location_id=? AND date_id=? AND winner_id=? AND loser_id=? AND winner_score=? AND loser_score=? 
