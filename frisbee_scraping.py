@@ -123,10 +123,7 @@ def insert_game_date(cur, conn, game_date):
 # Get correct and cleaned team names 
 def clean_team_name(name):
     name = re.sub(r'\s*\(\d+\)', '', name).strip()
-    if re.search(r'^(W|L)\s+of', name, re.IGNORECASE) or \
-       re.search(r'Winner of', name, re.IGNORECASE) or \
-       re.search(r'Loser of', name, re.IGNORECASE) or \
-       'Bracket' in name or 'Pool' in name:
+    if re.match(r'^(w|l)\s+of', name, re.IGNORECASE):
         return None
     return name
 
@@ -134,7 +131,7 @@ def clean_team_name(name):
 def is_valid_score(score):
     return score != "0-0" and "F-" not in score and "-F" not in score
 
-# Clean the score and conver to integers 
+# Clean the score and convert to integers 
 def clean_score(score):
     try:
         scores = score.split('-')
