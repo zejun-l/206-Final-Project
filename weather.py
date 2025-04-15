@@ -1,59 +1,86 @@
+import sqlite3
 import openmeteo_requests
-
 import requests_cache
-import pandas as pd
 from retry_requests import retry
 
-# Setup the Open-Meteo API client with cache and retry on error
-cache_session = requests_cache.CachedSession('.cache', expire_after = -1)
-retry_session = retry(cache_session, retries = 5, backoff_factor = 0.2)
-openmeteo = openmeteo_requests.Client(session = retry_session)
+# type into in terminal to install openmeteo-requests
 
-# Make sure all required weather variables are listed here
-# The order of variables in hourly or daily is important to assign them correctly below
-url = "https://archive-api.open-meteo.com/v1/archive"
-params = {
-	"latitude": 52.52,
-	"longitude": 13.41,
-	"start_date": "2025-03-23",
-	"end_date": "2025-04-06",
-	"hourly": ["temperature_2m", "precipitation", "wind_speed_10m", "wind_speed_100m"]
-}
-responses = openmeteo.weather_api(url, params=params)
 
-# Process first location. Add a for-loop for multiple locations or weather models
-response = responses[0]
-print(f"Coordinates {response.Latitude()}°N {response.Longitude()}°E")
-print(f"Elevation {response.Elevation()} m asl")
-print(f"Timezone {response.Timezone()}{response.TimezoneAbbreviation()}")
-print(f"Timezone difference to GMT+0 {response.UtcOffsetSeconds()} s")
 
-# Process hourly data. The order of variables needs to be the same as requested.
-hourly = response.Hourly()
-hourly_temperature_2m = hourly.Variables(0).ValuesAsNumpy()
-hourly_precipitation = hourly.Variables(1).ValuesAsNumpy()
-hourly_wind_speed_10m = hourly.Variables(2).ValuesAsNumpy()
-hourly_wind_speed_100m = hourly.Variables(3).ValuesAsNumpy()
 
-hourly_data = {"date": pd.date_range(
-	start = pd.to_datetime(hourly.Time(), unit = "s", utc = True),
-	end = pd.to_datetime(hourly.TimeEnd(), unit = "s", utc = True),
-	freq = pd.Timedelta(seconds = hourly.Interval()),
-	inclusive = "left"
-)}
+# ------------------ Setup API client with caching + retry ------------------
+cache_session = requests_cache.CachedSession('.cache', expire_after=-1)
+retry_session = retry(cache_session, retries=5, backoff_factor=0.2)
+openmeteo = openmeteo_requests.Client(session=retry_session)
 
-hourly_data["temperature_2m"] = hourly_temperature_2m
-hourly_data["precipitation"] = hourly_precipitation
-hourly_data["wind_speed_10m"] = hourly_wind_speed_10m
-hourly_data["wind_speed_100m"] = hourly_wind_speed_100m
+# ------------------ Connect to SQLite database ------------------
+conn = sqlite3.connect("games.db")
+cur = conn.cursor()
 
-hourly_dataframe = pd.DataFrame(data = hourly_data)
-print(hourly_dataframe)
+# ------------------ Create weather table if it doesn’t exist ------------------
+cur.execute('''
+    CREATE TABLE IF NOT EXISTS weather (
+        game_id INTEGER PRIMARY KEY,
+        wind_speed_mph REAL,
+        temperature_f REAL,
+        precipitation_hours REAL,
+        FOREIGN KEY(game_id) REFERENCES games(id)
+    )
+''')
 
-#collect info on frisbee loses at certain locations(date and time) 
-# and weather conditions (date and temperature)
+# ------------------ Select up to 25 games missing weather data ------------------
+cur.execute('''
+    SELECT games.id, dates.game_date, geocoding.lat, geocoding.lon
+    FROM games
+    JOIN dates ON games.date_id = dates.id
+    JOIN geocoding ON games.id = geocoding.game_id
+    LEFT JOIN weather ON games.id = weather.game_id
+    WHERE weather.game_id IS NULL
+    LIMIT 25
+''')
+games = cur.fetchall() 
 
-#store into a temporary dictionary first to put into the database, in this way its easier to call from database instead of calling from a file
-def collect_temperature(data):
-    temp_data  = {}
-    
+# ------------------ Fetch weather data and insert into database ------------------
+for game_id, game_date, lat, lon in games:
+    try:
+        # Convert MM/DD/YYYY -> YYYY-MM-DD
+        month, day, year = game_date.split("/")
+        date_str = f"{year}-{month.zfill(2)}-{day.zfill(2)}"
+
+        # API request parameters
+        url = "https://archive-api.open-meteo.com/v1/archive"
+        params = {
+            "latitude": lat,
+            "longitude": lon,
+            "start_date": date_str,
+            "end_date": date_str,
+            "daily": ["wind_speed_10m_max", "precipitation_hours", "temperature_2m_max"],
+            "temperature_unit": "fahrenheit",
+            "wind_speed_unit": "mph",
+            "timezone": "America/New_York"
+        }
+
+        # Make API request
+        responses = openmeteo.weather_api(url, params=params)
+        response = responses[0]
+        daily = response.Daily()
+
+        wind = int(daily.Variables(0).ValuesAsNumpy()[0])
+        precip = int(daily.Variables(1).ValuesAsNumpy()[0])
+        temp = int(daily.Variables(2).ValuesAsNumpy()[0])
+
+        # Insert into weather table
+        cur.execute('''
+            INSERT OR REPLACE INTO weather (game_id, wind_speed, temperature, precipitation)
+            VALUES (?, ?, ?, ?)
+        ''', (game_id, wind, temp, precip))
+
+        print(f"Weather for game {game_id} on {date_str}: Wind={wind} mph, Temp={temp} °F, Precip={precip} hrs")
+
+    except Exception as e:
+        print(f"Error with game {game_id} on {game_date}: {e}")
+
+# ------------------ Finalize ------------------
+conn.commit()
+conn.close()
+print(" Weather update complete.")
