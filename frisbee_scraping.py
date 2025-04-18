@@ -151,11 +151,21 @@ def scrape_event_and_schedule(event_url, schedule_url, cur, conn, max_new_games,
     event_response = session.get(event_url)
     event_soup = BeautifulSoup(event_response.content, 'html.parser')
     info_div = event_soup.find('div', class_='eventInfo2')
-    info_text = info_div.get_text(separator=' ', strip=True) if info_div else ''
+    
+    if info_div:
+        info_text = info_div.get_text(separator=' ', strip=True)
+    else:
+        info_text = ''
+
     match = re.search(r'City:\s*(.*?)\s+Date:\s*.*?\s+State:\s*([A-Z]{2})', info_text)
 
-    city = match.group(1) if match else None
-    state = match.group(2) if match else None
+    if match:
+        city = match.group(1)
+        state = match.group(2)
+    else:
+        city = None
+        state = None
+
     location_id = insert_location(cur, conn, city, state)
 
     # Get game results from schedule page
@@ -190,6 +200,7 @@ def scrape_event_and_schedule(event_url, schedule_url, cur, conn, max_new_games,
         match = re.match(r'(\d{1,2}/\d{1,2}/\d{4})', game_date)
         if match:
             game_date = match.group(1)
+            
         date_id = insert_game_date(cur, conn, game_date)
 
         winner_score_int, loser_score_int = clean_score(f"{winner_score}-{loser_score}")
