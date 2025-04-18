@@ -3,9 +3,12 @@ import openmeteo_requests
 import requests_cache
 from retry_requests import retry
 
-# type into in terminal to install openmeteo-requests
+# type into into terminal these two commands to install openmeteo-requests:
+# pip install openmeteo-requests
+# pip install requests-cache retry-requests numpy pandas
 
-
+# more information found here https://pypi.org/project/openmeteo-requests/
+# weather api: https://open-meteo.com/en/docs/historical-weather-api
 
 
 # ------------------ Setup API client with caching + retry ------------------
