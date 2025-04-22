@@ -3,14 +3,6 @@ import openmeteo_requests
 import requests_cache
 from retry_requests import retry
 
-# type into into terminal these two commands to install openmeteo-requests:
-# pip install openmeteo-requests
-# pip install requests-cache retry-requests numpy pandas
-
-# more information found here https://pypi.org/project/openmeteo-requests/
-# weather api: https://open-meteo.com/en/docs/historical-weather-api
-
-
 # ------------------ Setup API client with caching + retry ------------------
 cache_session = requests_cache.CachedSession('.cache', expire_after=-1)
 retry_session = retry(cache_session, retries=5, backoff_factor=0.2)
@@ -24,9 +16,9 @@ cur = conn.cursor()
 cur.execute('''
     CREATE TABLE IF NOT EXISTS weather (
         game_id INTEGER PRIMARY KEY,
-        wind_speed_mph REAL,
-        temperature_f REAL,
-        precipitation_hours REAL,
+        wind_speed REAL,
+        temperature REAL,
+        precipitation REAL,
         FOREIGN KEY(game_id) REFERENCES games(id)
     )
 ''')
@@ -68,9 +60,9 @@ for game_id, game_date, lat, lon in games:
         response = responses[0]
         daily = response.Daily()
 
-        wind = int(daily.Variables(0).ValuesAsNumpy()[0])
-        precip = int(daily.Variables(1).ValuesAsNumpy()[0])
-        temp = int(daily.Variables(2).ValuesAsNumpy()[0])
+        wind = float(daily.Variables(0).ValuesAsNumpy()[0])
+        precip = float(daily.Variables(1).ValuesAsNumpy()[0])
+        temp = float(daily.Variables(2).ValuesAsNumpy()[0])
 
         # Insert into weather table
         cur.execute('''

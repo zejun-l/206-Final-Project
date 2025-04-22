@@ -27,13 +27,21 @@ def setup_database():
     conn = sqlite3.connect('games.db')
     cur = conn.cursor()
 
+    # Create table for states
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS states (
+                state_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                state TEXT UNIQUE)
+    ''')
+
     # Create tables for locations
     cur.execute('''
         CREATE TABLE IF NOT EXISTS locations (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             city TEXT,
-            state TEXT,
-            UNIQUE(city, state)
+            state_id INTEGER,
+            UNIQUE(city, state_id),
+            FOREIGN KEY (state_id) REFERENCES states(state_id)
         )
     ''')
 
@@ -100,10 +108,18 @@ def wipe_database(cur, conn):
 # ----------- Inserting into tables ----------- 
 def insert_location(cur, conn, city, state):
     cur.execute('''
-        INSERT OR IGNORE INTO locations (city, state) VALUES (?, ?)
-    ''', (city, state))
+        INSERT OR IGNORE INTO states (state) VALUES (?)
+    ''', (state,))
     conn.commit()
-    cur.execute('SELECT id FROM locations WHERE city=? AND state=?', (city, state))
+    cur.execute('''
+        SELECT state_id from STATES where state=?
+    ''', (state,))
+    state_id = cur.fetchone()[0]
+    cur.execute('''
+        INSERT OR IGNORE INTO locations (city, state_id) VALUES (?, ?)
+    ''', (city, state_id))
+    conn.commit()
+    cur.execute('SELECT id FROM locations WHERE city=? AND state_id=?', (city, state_id))
     return cur.fetchone()[0]
 
 def insert_team(cur, conn, team_name):

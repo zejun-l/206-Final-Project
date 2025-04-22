@@ -10,7 +10,7 @@ conn = sqlite3.connect('games.db')
 cur = conn.cursor()
 
 # Get needed data for geocoding api
-cur.execute('SELECT games.id, locations.city, locations.state FROM games JOIN locations ON games.location_id = locations.id')
+cur.execute('SELECT games.id, locations.city, states.state FROM games JOIN locations ON games.location_id = locations.id JOIN states ON locations.state_id = states.state_id')
 data = cur.fetchall()
 
 # create geocoding table in games db if it doesn't already exist
